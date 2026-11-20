@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>쉬는 시간 2인용 오목 대결</title>
+    <!-- Tailwind CSS 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tone.js 로드 (바둑알 놓는 소리 및 승리 효과음) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <!-- Google Fonts: 둥글둥글하고 가독성 좋은 Jua 및 Noto Sans KR 폰트 -->
+    <link href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            touch-action: manipulation; /* 모바일/태블릿 더블탭 확대 방지 */
+            user-select: none; /* 텍스트 드래그 방지 */
+            -webkit-user-select: none;
+            background-color: #f3efe6;
+        }
+        
+        .font-jua {
+            font-family: 'Jua', sans-serif;
+        }
+
+        /* 바둑판 나무 질감 및 입체감 */
+        .board-container {
+            background: linear-gradient(135deg, #e6b873 0%, #d49e52 100%);
+            box-shadow: 0 12px 24px -6px rgba(92, 64, 24, 0.35), inset 0 2px 4px rgba(255, 255, 255, 0.4);
+            border: 4px solid #8c5a20;
+        }
+
+        /* 캔버스 반응형 유지 */
+        #gomokuCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+            touch-action: none;
+        }
+
+        /* 버튼 입체 효과 */
+        .btn-3d {
+            transition: all 0.1s ease;
+            box-shadow: 0 4px 0 rgba(0, 0, 0, 0.2);
+        }
+        .btn-3d:active {
+            transform: translateY(3px);
+            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+        }
+
+        /* 승리 모달 애니메이션 */
+        @keyframes popIn {
+            0% { transform: scale(0.8); opacity: 0; }
+            70% { transform: scale(1.05); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-pop {
+            animation: popIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        /* 현재 턴 표시 펄스 효과 */
+        @keyframes pulseBorder {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+            50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+        }
+        .active-turn-card {
+            animation: pulseBorder 2s infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between items-center p-2 sm:p-4 text-stone-800">
+
+    <!-- 상단 헤더 & 전적 표시 -->
+    <header class="w-full max-w-4xl flex flex-wrap justify-between items-center bg-white/90 backdrop-blur-sm rounded-2xl px-4 py-2.5 shadow-sm border border-amber-200 mb-2">
+        <div class="flex items-center gap-2">
+            <span class="text-2xl sm:text-3xl">⚫⚪</span>
+            <h1 class="font-jua text-xl sm:text-2xl text-amber-900 tracking-wide">6학년 쉬는 시간 오목 대결!</h1>
+        </div>
+        
+        <div class="flex items-center gap-2 sm:gap-3">
+            <!-- 소리 켜기/끄기 버튼 -->
+            <button id="soundToggleBtn" onclick="toggleSound()" class="p-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 transition" title="소리 켜기/끄기">
+                <span id="soundIcon" class="text-lg">🔊</span>
+            </button>
+            <!-- 규칙 안내 버튼 -->
+            <button onclick="openRulesModal()" class="px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-sm transition flex items-center gap-1">
+                <span>📖</span> <span class="hidden sm:inline">규칙 보기</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- 메인 게임 영역 (태블릿 가로/세로 모두 대응) -->
+    <main class="w-full max-w-5xl flex-1 flex flex-col lg:flex-row items-center justify-center gap-3 sm:gap-6 my-auto">
+        
+        <!-- 플레이어 1 (흑돌) 상태 카드 -->
+        <div id="player1Card" class="w-full lg:w-56 flex lg:flex-col items-center justify-between bg-stone-900 text-white rounded-2xl p-3 sm:p-4 shadow-md border-4 border-amber-400 active-turn-card transition-all">
+            <div class="flex items-center gap-3 lg:flex-col lg:text-center">
+                <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-stone-600 to-black border-2 border-stone-500 shadow-inner flex items-center justify-center text-lg font-bold">
+                    흑
+                </div>
+                <div>
+                    <div class="font-jua text-lg sm:text-xl text-amber-300">1번 친구 (흑돌)</div>
+                    <div id="p1Status" class="text-xs sm:text-sm text-amber-200 font-bold mt-0.5">👉 지금 둘 차례!</div>
+                </div>
+            </div>
+            <div class="text-right lg:text-center lg:mt-3 bg-stone-800 px-3 py-1.5 rounded-xl">
+                <span class="text-xs text-stone-400 block">승리 횟수</span>
+                <span id="p1Score" class="font-jua text-xl sm:text-2xl text-white">0승</span>
+            </div>
+        </div>
+
+        <!-- 중앙 바둑판 컨테이너 (정사각형 비율 자동 조절) -->
+        <div class="relative flex items-center justify-center w-full max-w-[min(88vw,64vh)] aspect-square">
+            <div class="board-container w-full h-full rounded-2xl p-2 sm:p-3 flex items-center justify-center relative">
+                <canvas id="gomokuCanvas"></canvas>
+                
+                <!-- 착수 위치 확인용 커서/미리보기 안내 (터치 실수 방지용 2단계 착수 옵션 지원) -->
+                <div id="confirmOverlay" class="hidden absolute bottom-4 left-1/2 -translate-x-1/2 bg-stone-900/90 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-3 z-10 border border-amber-400">
+                    <span class="text-sm font-bold text-amber-300">여기에 놓을까요?</span>
+                    <button onclick="confirmMove()" class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-3 py-1 rounded-full text-sm">확인</button>
+                    <button onclick="cancelPreview()" class="bg-stone-600 hover:bg-stone-500 text-white font-bold px-2.5 py-1 rounded-full text-sm">취소</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 플레이어 2 (백돌) 상태 카드 -->
+        <div id="player2Card" class="w-full lg:w-56 flex lg:flex-col items-center justify-between bg-white text-stone-800 rounded-2xl p-3 sm:p-4 shadow-md border-4 border-transparent opacity-80 transition-all">
+            <div class="flex items-center gap-3 lg:flex-col lg:text-center">
+                <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-white to-stone-200 border-2 border-stone-300 shadow-inner flex items-center justify-center text-lg font-bold text-stone-700">
+                    백
+                </div>
+                <div>
+                    <div class="font-jua text-lg sm:text-xl text-stone-800">2번 친구 (백돌)</div>
+                    <div id="p2Status" class="text-xs sm:text-sm text-stone-400 font-medium mt-0.5">대기 중...</div>
+                </div>
+            </div>
+            <div class="text-right lg:text-center lg:mt-3 bg-stone-100 px-3 py-1.5 rounded-xl">
+                <span class="text-xs text-stone-500 block">승리 횟수</span>
+                <span id="p2Score" class="font-jua text-xl sm:text-2xl text-stone-800">0승</span>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- 하단 컨트롤 버튼 바 -->
+    <footer class="w-full max-w-4xl flex flex-wrap justify-center items-center gap-2 sm:gap-4 mt-2 py-2">
+        <!-- 터치 실수 방지 모드 토글 -->
+        <button id="safeTouchBtn" onclick="toggleSafeTouch()" class="btn-3d px-3 sm:px-4 py-2.5 rounded-xl bg-indigo-100 text-indigo-900 font-bold text-xs sm:text-sm flex items-center gap-1.5 border border-indigo-200">
+            <span id="safeTouchIcon">👆</span>
+            <span id="safeTouchText">바로 놓기 모드</span>
+        </button>
+
+        <!-- 한 수 무르기 버튼 -->
+        <button id="undoBtn" onclick="undoMove()" disabled class="btn-3d px-4 sm:px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:bg-stone-300 disabled:text-stone-500 disabled:shadow-none text-white font-bold text-sm sm:text-base flex items-center gap-1.5">
+            <span>↩️</span> 한 수 무르기
+        </button>
+
+        <!-- 새 게임 시작 버튼 -->
+        <button onclick="askResetGame()" class="btn-3d px-4 sm:px-5 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-sm sm:text-base flex items-center gap-1.5">
+            <span>🔄</span> 새 판 시작
+        </button>
+    </footer>
+
+    <!-- 알림 메시지 토스트 (alert 대체용) -->
+    <div id="toastMessage" class="fixed top-20 left-1/2 -translate-x-1/2 bg-stone-800/95 text-white px-5 py-2.5 rounded-full shadow-xl font-bold text-sm sm:text-base pointer-events-none opacity-0 transition-opacity duration-300 z-50 border border-amber-400">
+        알림 메시지
+    </div>
+
+    <!-- 승리 축하 모달 -->
+    <div id="winModal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-3xl max-w-sm w-full p-6 text-center shadow-2xl border-4 border-amber-400 animate-pop">
+            <div class="text-5xl mb-2">🏆🎉</div>
+            <h2 id="winnerTitle" class="font-jua text-3xl text-amber-600 mb-1">1번 친구 (흑돌) 승리!</h2>
+            <p id="winnerSubtitle" class="text-stone-600 font-medium mb-6">5개의 돌을 멋지게 연결했어요!</p>
+            
+            <div class="bg-amber-50 rounded-2xl p-3 mb-6 flex justify-around border border-amber-200">
+                <div>
+                    <div class="text-xs text-stone-500">흑돌 승리</div>
+                    <div id="modalP1Score" class="font-jua text-xl text-stone-900">0승</div>
+                </div>
+                <div class="border-r border-amber-200"></div>
+                <div>
+                    <div class="text-xs text-stone-500">백돌 승리</div>
+                    <div id="modalP2Score" class="font-jua text-xl text-stone-900">0승</div>
+                </div>
+            </div>
+
+            <div class="flex gap-3">
+                <button onclick="closeWinModal()" class="flex-1 py-3 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold transition">
+                    바둑판 보기
+                </button>
+                <button onclick="resetBoardForNextRound()" class="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold shadow-md transition">
+                    다음 판 하기!
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 새 게임 확인 모달 (confirm 대체용) -->
+    <div id="confirmResetModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-3xl max-w-xs w-full p-6 text-center shadow-xl animate-pop">
+            <div class="text-4xl mb-2">🤔</div>
+            <h3 class="font-jua text-2xl text-stone-800 mb-2">판을 새로 짤까요?</h3>
+            <p class="text-sm text-stone-600 mb-5">현재 두고 있는 바둑돌이 모두 지워집니다.</p>
+            <div class="flex gap-2">
+                <button onclick="closeConfirmResetModal()" class="flex-1 py-2.5 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold">취소</button>
+                <button onclick="confirmResetBoard()" class="flex-1 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold">새로 시작</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 오목 규칙 안내 모달 -->
+    <div id="rulesModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl animate-pop">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-jua text-2xl text-amber-900 flex items-center gap-2">
+                    <span>📖</span> 쉬는 시간 오목 규칙
+                </h3>
+                <button onclick="closeRulesModal()" class="text-stone-400 hover:text-stone-700 text-2xl font-bold">&times;</button>
+            </div>
+            <ul class="space-y-3 text-sm sm:text-base text-stone-700 mb-6">
+                <li class="flex items-start gap-2">
+                    <span class="font-bold text-amber-600">1.</span>
+                    <span><strong>흑돌(1번 친구)</strong>이 먼저 시작하고, <strong>백돌(2번 친구)</strong>과 번갈아 가며 선이 만나는 교차점에 돌을 놓습니다.</span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <span class="font-bold text-amber-600">2.</span>
+                    <span>가로, 세로, 대각선 중 어느 방향이든 <strong>자기 돌 5개를 먼저 나란히 연결</strong>하면 승리합니다!</span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <span class="font-bold text-amber-600">3.</span>
+                    <span><strong>쌍삼(3-3) 금지 규칙:</strong> 흑돌은 한 번에 열린 3목 두 개를 동시에 만드는 자리(쌍삼)에는 놓을 수 없어요. (백돌은 가능!)</span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <span class="font-bold text-amber-600">4.</span>
+                    <span>손가락 터치가 헷갈릴 땐 아래쪽 <strong>[확인 후 놓기 모드]</strong>를 켜보세요!</span>
+                </li>
+            </ul>
+            <button onclick="closeRulesModal()" class="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-base shadow-md">
+                알겠어요! 게임하러 가기
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. 게임 설정 및 상태 변수
+        // ==========================================
+        const BOARD_SIZE = 15; // 표준 15x15 오목판
+        const EMPTY = 0;
+        const BLACK = 1; // 1번 친구
+        const WHITE = 2; // 2번 친구
+
+        let board = [];          // 15x15 바둑판 배열
+        let moveHistory = [];    // 착수 기록 (무르기 및 마지막 수 표시용)
+        let currentPlayer = BLACK;
+        let isGameOver = false;
+        let winningLine = [];    // 승리한 5개 돌의 좌표 배열
+        
+        // 전적 기록
+        let scores = { [BLACK]: 0, [WHITE]: 0 };
+
+        // 태블릿 조작 편의 옵션
+        let safeTouchMode = false; // true일 경우 터치 후 '확인' 버튼을 눌러야 착수됨
+        let previewPos = null;     // 안전 터치 모드 시 미리보기 좌표 {r, c}
+        let soundEnabled = true;   // 효과음 활성화 여부
+
+        // 캔버스 관련 변수
+        const canvas = document.getElementById('gomokuCanvas');
+        const ctx = canvas.getContext('2d');
+        let cellSize = 0;
+        let padding = 0;
+
+        // ==========================================
+        // 2. 효과음 (Tone.js 합성 사운드)
+        // ==========================================
+        let stoneSynth = null;
+        let winSynth = null;
+
+        function initAudio() {
+            if (!stoneSynth) {
+                // 바둑알 착수음 (목탁/나무 부딪히는 맑은 소리)
+                stoneSynth = new Tone.MembraneSynth({
+                    pitchDecay: 0.02,
+                    octaves: 3,
+                    oscillator: { type: "sine" },
+                    envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.05 }
+                }).toDestination();
+                stoneSynth.volume.value = -4;
+
+                // 승리 팡파레 신디사이저
+                winSynth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: "triangle" },
+                    envelope: { attack: 0.02, decay: 0.2, sustain: 0.2, release: 0.5 }
+                }).toDestination();
+                winSynth.volume.value = -6;
+            }
+        }
+
+        function playStoneSound(player) {
+            if (!soundEnabled) return;
+            try {
+                if (Tone.context.state !== 'running') Tone.start();
+                initAudio();
+                // 흑돌은 약간 묵직하게, 백돌은 약간 경쾌하게
+                const note = player === BLACK ? "G3" : "A3";
+                stoneSynth.triggerAttackRelease(note, "16n");
+            } catch (e) {
+                console.log("Audio play skipped:", e);
+            }
+        }
+
+        function playWinSound() {
+            if (!soundEnabled) return;
+            try {
+                if (Tone.context.state !== 'running') Tone.start();
+                initAudio();
+                const now = Tone.now();
+                winSynth.triggerAttackRelease("C5", "8n", now);
+                winSynth.triggerAttackRelease("E5", "8n", now + 0.12);
+                winSynth.triggerAttackRelease("G5", "8n", now + 0.24);
+                winSynth.triggerAttackRelease("C6", "2n", now + 0.36);
+            } catch (e) {
+                console.log("Win audio skipped:", e);
+            }
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            document.getElementById('soundIcon').textContent = soundEnabled ? '🔊' : '🔇';
+            showToast(soundEnabled ? '효과음이 켜졌습니다.' : '효과음이 꺼졌습니다.');
+        }
+
+        // ==========================================
+        // 3. 게임 초기화 및 UI 업데이트
+        // ==========================================
+        function initGame() {
+            board = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(EMPTY));
+            moveHistory = [];
+            currentPlayer = BLACK;
+            isGameOver = false;
+            winningLine = [];
+            previewPos = null;
+            
+            document.getElementById('confirmOverlay').classList.add('hidden');
+            updateTurnUI();
+            updateUndoButton();
+            resizeCanvas();
+        }
+
+        function updateTurnUI() {
+            const p1Card = document.getElementById('player1Card');
+            const p2Card = document.getElementById('player2Card');
+            const p1Status = document.getElementById('p1Status');
+            const p2Status = document.getElementById('p2Status');
+
+            if (isGameOver) {
+                p1Card.classList.remove('active-turn-card', 'border-amber-400');
+                p2Card.classList.remove('active-turn-card', 'border-amber-400');
+                p1Card.classList.add('opacity-90');
+                p2Card.classList.add('opacity-90');
+                p1Status.textContent = "게임 종료";
+                p2Status.textContent = "게임 종료";
+                return;
+            }
+
+            if (currentPlayer === BLACK) {
+                p1Card.classList.add('active-turn-card', 'border-amber-400');
+                p1Card.classList.remove('opacity-70');
+                p1Status.textContent = "👉 지금 둘 차례!";
+                p1Status.className = "text-xs sm:text-sm text-amber-300 font-bold mt-0.5";
+
+                p2Card.classList.remove('active-turn-card', 'border-amber-400');
+                p2Card.classList.add('opacity-70');
+                p2Status.textContent = "잠시 기다려요";
+                p2Status.className = "text-xs sm:text-sm text-stone-400 font-medium mt-0.5";
+            } else {
+                p2Card.classList.add('active-turn-card', 'border-amber-400');
+                p2Card.classList.remove('opacity-70');
+                p2Status.textContent = "👉 지금 둘 차례!";
+                p2Status.className = "text-xs sm:text-sm text-amber-600 font-bold mt-0.5";
+
+                p1Card.classList.remove('active-turn-card', 'border-amber-400');
+                p1Card.classList.add('opacity-70');
+                p1Status.textContent = "잠시 기다려요";
+                p1Status.className = "text-xs sm:text-sm text-stone-400 font-medium mt-0.5";
+            }
+        }
+
+        function updateUndoButton() {
+            const undoBtn = document.getElementById('undoBtn');
+            undoBtn.disabled = moveHistory.length === 0 || isGameOver;
+        }
+
+        function updateScoreUI() {
+            document.getElementById('p1Score').textContent = `${scores[BLACK]}승`;
+            document.getElementById('p2Score').textContent = `${scores[WHITE]}승`;
+            document.getElementById('modalP1Score').textContent = `${scores[BLACK]}승`;
+            document.getElementById('modalP2Score').textContent = `${scores[WHITE]}승`;
+        }
+
+        // ==========================================
+        // 4. 바둑판 그리기 (고해상도 Retina 디스플레이 대응)
+        // ==========================================
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            const rect = container.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            
+            // 컨테이너 내부 패딩을 제외한 실제 크기
+            const size = Math.min(rect.width, rect.height) - 16; 
+            if (size <= 0) return;
+
+            canvas.style.width = `${size}px`;
+            canvas.style.height = `${size}px`;
+            canvas.width = size * dpr;
+            canvas.height = size * dpr;
+
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.scale(dpr, dpr);
+
+            padding = size * 0.055;
+            cellSize = (size - padding * 2) / (BOARD_SIZE - 1);
+
+            drawBoard();
+        }
+
+        function drawBoard() {
+            const width = canvas.width / (window.devicePixelRatio || 1);
+            const height = canvas.height / (window.devicePixelRatio || 1);
+
+            ctx.clearRect(0, 0, width, height);
+
+            // 1. 격자선 그리기
+            ctx.strokeStyle = '#4a3219';
+            ctx.lineWidth = 1.2;
+
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                const pos = padding + i * cellSize;
+                
+                // 가로선
+                ctx.beginPath();
+                ctx.moveTo(padding, pos);
+                ctx.lineTo(width - padding, pos);
+                ctx.stroke();
+
+                // 세로선
+                ctx.beginPath();
+                ctx.moveTo(pos, padding);
+                ctx.lineTo(pos, height - padding);
+                ctx.stroke();
+            }
+
+            // 외곽 테두리 진하게
+            ctx.lineWidth = 2.2;
+            ctx.strokeRect(padding, padding, width - padding * 2, height - padding * 2);
+
+            // 2. 화점 (천원 및 4귀퉁이 점) 그리기 (15x15 기준: 3, 7, 11)
+            const starPoints = [3, 7, 11];
+            ctx.fillStyle = '#3b2510';
+            for (let r of starPoints) {
+                for (let c of starPoints) {
+                    const x = padding + c * cellSize;
+                    const y = padding + r * cellSize;
+                    ctx.beginPath();
+                    ctx.arc(x, y, Math.max(3, cellSize * 0.11), 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // 3. 놓여진 바둑돌 그리기
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (board[r][c] !== EMPTY) {
+                        drawStone(r, c, board[r][c], false);
+                    }
+                }
+            }
+
+            // 4. 안전 터치 모드 미리보기 돌 그리기
+            if (previewPos && !isGameOver) {
+                drawStone(previewPos.r, previewPos.c, currentPlayer, true);
+            }
+
+            // 5. 마지막으로 놓은 돌 표시 (빨간 점)
+            if (moveHistory.length > 0 && winningLine.length === 0) {
+                const lastMove = moveHistory[moveHistory.length - 1];
+                const lx = padding + lastMove.c * cellSize;
+                const ly = padding + lastMove.r * cellSize;
+                
+                ctx.fillStyle = '#ef4444';
+                ctx.beginPath();
+                ctx.arc(lx, ly, cellSize * 0.14, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // 6. 승리한 5목 강조 표시
+            if (winningLine.length > 0) {
+                // 연결선 그리기
+                const start = winningLine[0];
+                const end = winningLine[winningLine.length - 1];
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = Math.max(4, cellSize * 0.15);
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(padding + start.c * cellSize, padding + start.r * cellSize);
+                ctx.lineTo(padding + end.c * cellSize, padding + end.r * cellSize);
+                ctx.stroke();
+
+                // 승리 돌 테두리 빛나게 표시
+                for (let pos of winningLine) {
+                    const wx = padding + pos.c * cellSize;
+                    const wy = padding + pos.r * cellSize;
+                    ctx.strokeStyle = '#facc15';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(wx, wy, cellSize * 0.44, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function drawStone(r, c, player, isPreview) {
+            const x = padding + c * cellSize;
+            const y = padding + r * cellSize;
+            const radius = cellSize * 0.43;
+
+            ctx.save();
+            if (isPreview) {
+                ctx.globalAlpha = 0.65;
+            }
+
+            // 그림자 효과
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+            ctx.shadowBlur = 4;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+
+            // 입체 그라데이션
+            const grad = ctx.createRadialGradient(
+                x - radius * 0.3, y - radius * 0.3, radius * 0.1,
+                x, y, radius
+            );
+
+            if (player === BLACK) {
+                grad.addColorStop(0, '#57534e');
+                grad.addColorStop(0.4, '#1c1917');
+                grad.addColorStop(1, '#000000');
+            } else {
+                grad.addColorStop(0, '#ffffff');
+                grad.addColorStop(0.7, '#f5f5f4');
+                grad.addColorStop(1, '#d6d3d1');
+            }
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 백돌 테두리 선명하게
+            if (player === WHITE) {
+                ctx.shadowColor = 'transparent';
+                ctx.strokeStyle = '#a8a29e';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+
+            // 미리보기 점선 테두리
+            if (isPreview) {
+                ctx.shadowColor = 'transparent';
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 3]);
+                ctx.beginPath();
+                ctx.arc(x, y, radius + 2, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+
+        // ==========================================
+        // 5. 터치 및 클릭 입력 처리
+        // ==========================================
+        function getGridCoords(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+
+            const c = Math.round((x - padding) / cellSize);
+            const r = Math.round((y - padding) / cellSize);
+
+            if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE) {
+                return { r, c };
+            }
+            return null;
+        }
+
+        function handleBoardInteraction(clientX, clientY) {
+            if (isGameOver) return;
+
+            const coords = getGridCoords(clientX, clientY);
+            if (!coords) return;
+
+            const { r, c } = coords;
+
+            // 이미 돌이 있는 자리면 무시
+            if (board[r][c] !== EMPTY) {
+                showToast("이미 돌이 놓여 있는 자리예요!");
+                return;
+            }
+
+            // 흑돌 쌍삼(3-3) 금수 체크
+            if (currentPlayer === BLACK && isDoubleThree(r, c, BLACK)) {
+                showToast("⚠️ 흑돌은 '쌍삼(3-3)' 자리에 놓을 수 없어요!");
+                return;
+            }
+
+            if (safeTouchMode) {
+                // 안전 터치 모드: 먼저 위치를 보여주고 확인 버튼을 띄움
+                previewPos = { r, c };
+                document.getElementById('confirmOverlay').classList.remove('hidden');
+                drawBoard();
+            } else {
+                // 바로 놓기 모드
+                placeStone(r, c);
+            }
+        }
+
+        // 마우스 클릭 이벤트
+        canvas.addEventListener('click', (e) => {
+            handleBoardInteraction(e.clientX, e.clientY);
+        });
+
+        // 터치 이벤트 (태블릿 반응속도 향상)
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // 스크롤 및 중복 클릭 방지
+            if (e.touches.length === 1) {
+                const touch = e.touches[0];
+                handleBoardInteraction(touch.clientX, touch.clientY);
+            }
+        }, { passive: false });
+
+        function confirmMove() {
+            if (previewPos && !isGameOver) {
+                const { r, c } = previewPos;
+                previewPos = null;
+                document.getElementById('confirmOverlay').classList.add('hidden');
+                placeStone(r, c);
+            }
+        }
+
+        function cancelPreview() {
+            previewPos = null;
+            document.getElementById('confirmOverlay').classList.add('hidden');
+            drawBoard();
+        }
+
+        function toggleSafeTouch() {
+            safeTouchMode = !safeTouchMode;
+            previewPos = null;
+            document.getElementById('confirmOverlay').classList.add('hidden');
+            
+            const btn = document.getElementById('safeTouchBtn');
+            const text = document.getElementById('safeTouchText');
+            const icon = document.getElementById('safeTouchIcon');
+
+            if (safeTouchMode) {
+                btn.className = "btn-3d px-3 sm:px-4 py-2.5 rounded-xl bg-emerald-600 text-white font-bold text-xs sm:text-sm flex items-center gap-1.5 border border-emerald-700";
+                icon.textContent = "✅";
+                text.textContent = "확인 후 놓기 (켜짐)";
+                showToast("실수 방지 모드: 터치 후 [확인]을 눌러 돌을 놓습니다.");
+            } else {
+                btn.className = "btn-3d px-3 sm:px-4 py-2.5 rounded-xl bg-indigo-100 text-indigo-900 font-bold text-xs sm:text-sm flex items-center gap-1.5 border border-indigo-200";
+                icon.textContent = "👆";
+                text.textContent = "바로 놓기 모드";
+                showToast("바로 놓기 모드: 터치하면 즉시 돌이 놓입니다.");
+            }
+            drawBoard();
+        }
+
+        // ==========================================
+        // 6. 착수, 승리 판정 및 쌍삼(3-3) 규칙 로직
+        // ==========================================
+        function placeStone(r, c) {
+            board[r][c] = currentPlayer;
+            moveHistory.push({ r, c, player: currentPlayer });
+            
+            playStoneSound(currentPlayer);
+
+            // 승리 여부 확인
+            const winCoords = checkWin(r, c, currentPlayer);
+            if (winCoords) {
+                isGameOver = true;
+                winningLine = winCoords;
+                scores[currentPlayer]++;
+                updateScoreUI();
+                updateTurnUI();
+                updateUndoButton();
+                drawBoard();
+                
+                playWinSound();
+                setTimeout(() => {
+                    showWinModal(currentPlayer);
+                }, 600);
+                return;
+            }
+
+            // 무승부 확인 (바둑판이 꽉 찬 경우)
+            if (moveHistory.length === BOARD_SIZE * BOARD_SIZE) {
+                isGameOver = true;
+                updateTurnUI();
+                updateUndoButton();
+                drawBoard();
+                showToast("바둑판이 가득 차서 무승부가 되었어요!");
+                return;
+            }
+
+            // 턴 교대
+            currentPlayer = currentPlayer === BLACK ? WHITE : BLACK;
+            updateTurnUI();
+            updateUndoButton();
+            drawBoard();
+        }
+
+        // 4방향(가로, 세로, 우하향 대각선, 우상향 대각선) 5목 확인
+        function checkWin(r, c, player) {
+            const directions = [
+                [0, 1],  // 가로
+                [1, 0],  // 세로
+                [1, 1],  // 대각선 \
+                [1, -1]  // 대각선 /
+            ];
+
+            for (let [dr, dc] of directions) {
+                let line = [{ r, c }];
+
+                // 정방향 탐색
+                let nr = r + dr, nc = c + dc;
+                while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
+                    line.push({ r: nr, c: nc });
+                    nr += dr;
+                    nc += dc;
+                }
+
+                // 역방향 탐색
+                nr = r - dr;
+                nc = c - dc;
+                while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
+                    line.unshift({ r: nr, c: nc });
+                    nr -= dr;
+                    nc -= dc;
+                }
+
+                // 정확히 5개 이상 연결되면 승리 (초등학생 눈높이에 맞춰 5목 이상 승리 인정)
+                if (line.length >= 5) {
+                    return line;
+                }
+            }
+            return null;
+        }
+
+        // 초등학생 오목 기본 매너: 흑돌 쌍삼(열린 3이 동시에 2개 생기는 수) 판별
+        function isDoubleThree(r, c, player) {
+            board[r][c] = player; // 임시 착수
+            let openThreeCount = 0;
+
+            const directions = [
+                [0, 1], [1, 0], [1, 1], [1, -1]
+            ];
+
+            for (let [dr, dc] of directions) {
+                if (checkOpenThreeInDirection(r, c, dr, dc, player)) {
+                    openThreeCount++;
+                }
+            }
+
+            board[r][c] = EMPTY; // 원상복구
+            return openThreeCount >= 2;
+        }
+
+        // 특정 방향에서 양쪽 끝이 막히지 않은 '열린 3(활삼)'인지 확인
+        function checkOpenThreeInDirection(r, c, dr, dc, player) {
+            // 해당 축의 -4 ~ +4 범위 문자열 추출 (0: 빈칸, 1: 내돌, 2: 상대돌/벽)
+            let lineStr = "";
+            for (let i = -4; i <= 4; i++) {
+                const nr = r + dr * i;
+                const nc = c + dc * i;
+                if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) {
+                    lineStr += "2";
+                } else if (board[nr][nc] === EMPTY) {
+                    lineStr += "0";
+                } else if (board[nr][nc] === player) {
+                    lineStr += "1";
+                } else {
+                    lineStr += "2";
+                }
+            }
+
+            // 중심(인덱스 4)을 포함하는 대표적인 열린 3 패턴들
+            // 패턴 예: 01110, 010110, 011010 (양쪽 끝이 0으로 열려있어야 함)
+            const openThreePatterns = [
+                "01110",
+                "010110",
+                "011010"
+            ];
+
+            for (let pat of openThreePatterns) {
+                let idx = lineStr.indexOf(pat);
+                while (idx !== -1) {
+                    // 방금 둔 돌(인덱스 4)이 이 패턴 안에 포함되어 있는지 확인
+                    if (idx <= 4 && 4 < idx + pat.length) {
+                        // 양 바깥쪽까지 완전히 막혀있지 않은지 추가 확인 (001110 또는 011100 형태)
+                        const beforeChar = idx > 0 ? lineStr[idx - 1] : "2";
+                        const afterChar = (idx + pat.length) < lineStr.length ? lineStr[idx + pat.length] : "2";
+                        if (beforeChar === "0" || afterChar === "0") {
+                            return true;
+                        }
+                    }
+                    idx = lineStr.indexOf(pat, idx + 1);
+                }
+            }
+            return false;
+        }
+
+        // ==========================================
+        // 7. 무르기, 새 판 시작 및 모달 제어
+        // ==========================================
+        function undoMove() {
+            if (moveHistory.length === 0 || isGameOver) return;
+
+            previewPos = null;
+            document.getElementById('confirmOverlay').classList.add('hidden');
+
+            const lastMove = moveHistory.pop();
+            board[lastMove.r][lastMove.c] = EMPTY;
+            currentPlayer = lastMove.player;
+
+            updateTurnUI();
+            updateUndoButton();
+            drawBoard();
+            showToast("한 수를 물렀습니다! 다시 놓아보세요.");
+        }
+
+        function showWinModal(winner) {
+            const title = document.getElementById('winnerTitle');
+            const subtitle = document.getElementById('winnerSubtitle');
+            
+            if (winner === BLACK) {
+                title.textContent = "1번 친구 (흑돌) 승리!";
+                title.className = "font-jua text-3xl text-stone-900 mb-1";
+            } else {
+                title.textContent = "2번 친구 (백돌) 승리!";
+                title.className = "font-jua text-3xl text-amber-600 mb-1";
+            }
+            subtitle.textContent = `총 ${moveHistory.length}수 만에 멋진 5목을 완성했어요!`;
+            
+            document.getElementById('winModal').classList.remove('hidden');
+        }
+
+        function closeWinModal() {
+            document.getElementById('winModal').classList.add('hidden');
+        }
+
+        function resetBoardForNextRound() {
+            closeWinModal();
+            initGame();
+            showToast("새로운 대결이 시작되었습니다! 흑돌 먼저 시작해요.");
+        }
+
+        function askResetGame() {
+            if (moveHistory.length === 0) {
+                initGame();
+                return;
+            }
+            document.getElementById('confirmResetModal').classList.remove('hidden');
+        }
+
+        function closeConfirmResetModal() {
+            document.getElementById('confirmResetModal').classList.add('hidden');
+        }
+
+        function confirmResetBoard() {
+            closeConfirmResetModal();
+            initGame();
+            showToast("바둑판을 새로 정리했습니다!");
+        }
+
+        function openRulesModal() {
+            document.getElementById('rulesModal').classList.remove('hidden');
+        }
+
+        function closeRulesModal() {
+            document.getElementById('rulesModal').classList.add('hidden');
+        }
+
+        // 토스트 알림 메시지 표시 함수
+        let toastTimer = null;
+        function showToast(msg) {
+            const toast = document.getElementById('toastMessage');
+            toast.textContent = msg;
+            toast.classList.remove('opacity-0');
+            toast.classList.add('opacity-100');
+
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => {
+                toast.classList.remove('opacity-100');
+                toast.classList.add('opacity-0');
+            }, 2200);
+        }
+
+        // 창 크기 변경 시 바둑판 비율 자동 재조정
+        window.addEventListener('resize', resizeCanvas);
+
+        // 페이지 로드 완료 시 초기화
+        window.onload = function() {
+            initGame();
+        };
+    </script>
+</body>
+</html>
